@@ -34,15 +34,15 @@ the archives will be happier with a reset version.  On with the new features..
 With Microsoft C 5.1 and PCCurses, you can get Greed running on your PC.
 In fact, I'll bet a port to Turbo C 2.0 wouldn't be very hard at all, but I
 use Microsoft.  The whole port was done by Fred C. Smith, more info on him
-can be found at the top of greed.c.  All bug reports pertaining to the DOS
-port should be directed to the address of Fred specified in greed.c.
+can be found in the source history.  All bug reports pertaining to the DOS
+port should be directed to the address of Fred specified there.
 
 Additions to v3.0a (game-wise):
 Replaced '-p' option with 'p' command, to allow toggling of the highlighting
 moves feature.  Pretty nice, I think.. thanks to Jim Prescott.
 
-Color curses, for users with color capabilities (color monitor & SVR3).
-See the top of greed.c for details.
+Color terminal support, for users with color capabilities.
+See the source for details.
 
 Couple of possible pointer problems fixed, thanks to David Connet for pointing
 them out.

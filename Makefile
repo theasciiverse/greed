@@ -10,13 +10,8 @@ MANDIR      ?= $(DATADIR)/man
 
 SFILE=/usr/games/lib/greed.hs
 
-# Note: for some systems - do a check for ncurses and tinfo. Otherwise fallback on
-# standard curses library for compatiblity. If for some reason you don't like or want
-# ncurses, then it would be suggested to just put "-lcurses" in CURSES_LIB instead.
-
-CFLAGS += -O2 -Wall -Werror -Wextra -Wno-unused-parameter
-LDFLAGS =
-CURSES_LIB = $(shell pkg-config --libs ncurses tinfo 2>/dev/null || echo "-lcurses")
+RUSTC ?= rustc
+RUSTFLAGS += -C opt-level=2
 
 VERSION=$(shell sed -n <NEWS.adoc '/^[0-9]/s/:.*//p' | head -1)
 
@@ -34,14 +29,14 @@ VERSION=$(shell sed -n <NEWS.adoc '/^[0-9]/s/:.*//p' | head -1)
 .adoc.html:
 	asciidoctor -D. -a nofooter -a webfonts! $<
 
-.PHONY: all clean reflow cppcheck spellcheck install uninstall dist release refresh
+.PHONY: all clean reflow check spellcheck install uninstall dist release refresh
 
 # Build
 
 all: greed greed.6
 
-greed: greed.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -DSCOREFILE=\"$(SFILE)\" -DRELEASE=\"$(VERSION)\" -o greed greed.c $(CURSES_LIB)
+greed: greed.rs
+	SCOREFILE="$(SFILE)" RELEASE="$(VERSION)" $(RUSTC) --edition=2021 $(RUSTFLAGS) -o greed greed.rs
 
 clean:
 	rm -f *~ *.o greed greed-*.tar.gz  greed*.rpm *.html
@@ -50,11 +45,10 @@ clean:
 # Validate
 
 reflow:
-	@clang-format --style="{IndentWidth: 8, UseTab: ForIndentation}" -i $$(find . -name "*.[ch]")
+	@rustfmt greed.rs
 
-CPPCHECKOPTS =
-cppcheck:
-	@cppcheck --quiet --template=gcc $(CPPCHECKOPTS) greed.c
+check:
+	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; SCOREFILE="$(SFILE)" RELEASE="$(VERSION)" $(RUSTC) --edition=2021 $(RUSTFLAGS) --emit=metadata --out-dir "$$tmp" greed.rs
 
 spellcheck:
 	@spellcheck greed.adoc
@@ -74,7 +68,7 @@ uninstall:
 
 # Export
 
-SOURCES = README.adoc NEWS.adoc COPYING Makefile greed.c greed.adoc control greed-logo.png
+SOURCES = README.adoc NEWS.adoc COPYING Makefile greed.rs greed.adoc control greed-logo.png
 
 greed-$(VERSION).tar.gz: $(SOURCES)
 	mkdir greed-$(VERSION)
