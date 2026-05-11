@@ -1,5 +1,8 @@
 = greed project news
 
+Repoository head::
+  Code ported to Rust.
+
 4.5: 2026-03-30::
   Fix BSD build failure.
 
@@ -40,3 +43,25 @@
 
 3.6: 2003-12-29::
   Source RPMS no longer depend on --define myversion.
+
+== Older History
+
+The author of the C version, Matt Day, shipped versions up to 3.0a. He
+dropped out of sight and hasn't posted a new version or patch since
+1990.  He said: "I do not take credit for inventing the game, I once
+saw it on an IBM, and wrote it for Unix in C".  It probably originated
+as a DOS freeware game in the 1980s, but there's no trail of
+evidence before Matt's version and nothing matching in surviving
+DOS freeware archives.
+
+(Matt wrote) Additions to v3.0a (game-wise):
+Replaced '-p' option with 'p' command, to allow toggling of the highlighting
+moves feature.  Pretty nice, I think.. thanks to Jim Prescott.
+
+The 3.1 version featured better interrupt handling and the `p' suffix to
+GREEDOPTS.
+
+Before 5.0 this program used curses and terminfo, and supported a lot
+of terminal types that have become extinct or vanishingly rare since the
+end of the 20th century. Breadth of support was traded away to get a
+small, clean, memory-safe Rust implementation.
