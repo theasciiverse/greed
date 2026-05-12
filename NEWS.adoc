@@ -1,6 +1,6 @@
 = greed project news
 
-Repoository head::
+5.0: 2026-05-12::
   Code ported to Rust.
 
 4.5: 2026-03-30::
