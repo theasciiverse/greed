@@ -1,0 +1,12 @@
+[package]
+name = "greed"
+version = "5.0.0"
+edition = "2021"
+license = "BSD-2-Clause"
+
+[[bin]]
+name = "greed"
+path = "greed.rs"
+
+[dependencies]
+crossterm = "0.29"

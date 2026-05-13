@@ -8,11 +8,10 @@ Run this in an ANSI-compatible terminal emulator. Only requires cursor
 motion, the base 8 colors, and a small subset of the screen-elacing
 controls. Any xterm descendant or workalike is more than sufficient.
 
-Needs the Rust compiler to build the code, amd asciidoctor to render
+Needs the Rust compiler and Cargo to build the code, and asciidoctor to render
 the documentation.
 
 This code is commonly packaged as "greed".
 
 image:https://repology.org/badge/vertical-allrepos/greed.svg[Repology
 package status]
-

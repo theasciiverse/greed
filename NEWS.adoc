@@ -1,5 +1,8 @@
 = greed project news
 
+Repository head::
+  Change the code to use crossterm and build with cargo.
+
 5.0: 2026-05-12::
   Code ported to Rust.
 

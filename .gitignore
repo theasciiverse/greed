@@ -1,2 +1,5 @@
 greed
 greed.6
+*.html
+*.6
+target/

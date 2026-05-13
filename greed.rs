@@ -11,9 +11,17 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::mem::{align_of, size_of};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{self, Command, Stdio};
+use std::process::{self, Command};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use crossterm::cursor::{Hide, MoveTo, Show};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::style::{
+    Attribute, Color as TermColor, Print, ResetColor, SetAttribute, SetForegroundColor,
+};
+use crossterm::terminal::{self, Clear, ClearType};
+use crossterm::{execute, queue};
 
 const ME: char = '@';
 const MAXSCORES: usize = 10;
@@ -124,11 +132,7 @@ impl Lrand48 {
     }
 
     fn next(&mut self) -> i32 {
-        self.state = self
-            .state
-            .wrapping_mul(0x5deece66d)
-            .wrapping_add(0xb)
-            & Self::MASK;
+        self.state = self.state.wrapping_mul(0x5deece66d).wrapping_add(0xb) & Self::MASK;
         (self.state >> 17) as i32
     }
 
@@ -138,31 +142,32 @@ impl Lrand48 {
 }
 
 struct Terminal {
-    saved_stty: Option<String>,
+    raw_mode: bool,
     stdout: io::Stdout,
 }
 
 impl Terminal {
     fn enter() -> io::Result<Self> {
-        let saved_stty = stty_state();
-        if saved_stty.is_some() {
-            let _ = Command::new("stty")
-                .args(["raw", "-echo"])
-                .stdin(Stdio::inherit())
-                .status();
-        }
+        terminal::enable_raw_mode()?;
 
         let mut terminal = Self {
-            saved_stty,
+            raw_mode: true,
             stdout: io::stdout(),
         };
-        terminal.write("\x1b[?25l")?;
-        terminal.flush()?;
+        if let Err(err) = terminal.hide_cursor() {
+            let _ = terminal::disable_raw_mode();
+            return Err(err);
+        }
         Ok(terminal)
     }
 
+    fn hide_cursor(&mut self) -> io::Result<()> {
+        queue!(self.stdout, Hide)?;
+        self.flush()
+    }
+
     fn write(&mut self, text: &str) -> io::Result<()> {
-        self.stdout.write_all(text.as_bytes())
+        queue!(self.stdout, Print(text))
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -170,33 +175,33 @@ impl Terminal {
     }
 
     fn clear_screen(&mut self) -> io::Result<()> {
-        self.write("\x1b[2J")
+        queue!(self.stdout, Clear(ClearType::All))
     }
 
     fn move_to(&mut self, row: i32, col: i32) -> io::Result<()> {
-        write!(self.stdout, "\x1b[{};{}H", row + 1, col + 1)
+        queue!(self.stdout, MoveTo(coord(col), coord(row)))
     }
 
     fn clear_to_eol(&mut self) -> io::Result<()> {
-        self.write("\x1b[K")
+        queue!(self.stdout, Clear(ClearType::UntilNewLine))
     }
 
     fn set_attr(&mut self, attr: CellAttr, reverse: bool) -> io::Result<()> {
-        self.write("\x1b[0")?;
+        queue!(self.stdout, SetAttribute(Attribute::Reset), ResetColor)?;
         if attr.bold {
-            self.write(";1")?;
+            queue!(self.stdout, SetAttribute(Attribute::Bold))?;
         }
         if reverse {
-            self.write(";7")?;
+            queue!(self.stdout, SetAttribute(Attribute::Reverse))?;
         }
         if let Some(color) = attr.color {
-            write!(self.stdout, ";{}", color.sgr_code())?;
+            queue!(self.stdout, SetForegroundColor(color.term_color()))?;
         }
-        self.write("m")
+        Ok(())
     }
 
     fn reset_attr(&mut self) -> io::Result<()> {
-        self.write("\x1b[0m")
+        queue!(self.stdout, SetAttribute(Attribute::Reset), ResetColor)
     }
 
     fn addstr(&mut self, row: i32, col: i32, text: &str) -> io::Result<()> {
@@ -206,22 +211,23 @@ impl Terminal {
 
     fn addch(&mut self, row: i32, col: i32, ch: char) -> io::Result<()> {
         self.move_to(row, col)?;
-        write!(self.stdout, "{}", ch)
+        queue!(self.stdout, Print(ch))
     }
 }
 
 impl Drop for Terminal {
     fn drop(&mut self) {
         let _ = self.reset_attr();
-        let _ = self.write("\x1b[?25h");
+        let _ = queue!(self.stdout, Show);
         let _ = self.flush();
-        if let Some(saved) = &self.saved_stty {
-            let _ = Command::new("stty")
-                .arg(saved)
-                .stdin(Stdio::inherit())
-                .status();
+        if self.raw_mode {
+            let _ = terminal::disable_raw_mode();
         }
     }
+}
+
+fn coord(value: i32) -> u16 {
+    value.clamp(0, i32::from(u16::MAX)) as u16
 }
 
 enum Key {
@@ -241,15 +247,15 @@ enum MoveResult {
 }
 
 impl Color {
-    fn sgr_code(self) -> i32 {
+    fn term_color(self) -> TermColor {
         match self {
-            Color::Blue => 34,
-            Color::Green => 32,
-            Color::Cyan => 36,
-            Color::Red => 31,
-            Color::Magenta => 35,
-            Color::Yellow => 33,
-            Color::White => 37,
+            Color::Blue => TermColor::Blue,
+            Color::Green => TermColor::Green,
+            Color::Cyan => TermColor::Cyan,
+            Color::Red => TermColor::Red,
+            Color::Magenta => TermColor::Magenta,
+            Color::Yellow => TermColor::Yellow,
+            Color::White => TermColor::White,
         }
     }
 }
@@ -470,7 +476,11 @@ impl Game {
         term.addstr(
             self.config.status_row,
             7,
-            &format!("{}  {:.2}%", self.score, score_perc(self.score, self.config.height, self.config.width)),
+            &format!(
+                "{}  {:.2}%",
+                self.score,
+                score_perc(self.score, self.config.height, self.config.width)
+            ),
         )?;
         term.clear_to_eol()?;
         if self.havebotmsg {
@@ -530,23 +540,74 @@ impl Game {
                 version()
             ),
         )?;
-        term.addstr(4, 9, " The object of Greed is to erase as much of the screen as")?;
-        term.addstr(5, 9, " possible by moving around in a grid of numbers.  To move,")?;
-        term.addstr(6, 9, " use the arrow keys, your number pad, or one of the letters")?;
+        term.addstr(
+            4,
+            9,
+            " The object of Greed is to erase as much of the screen as",
+        )?;
+        term.addstr(
+            5,
+            9,
+            " possible by moving around in a grid of numbers.  To move,",
+        )?;
+        term.addstr(
+            6,
+            9,
+            " use the arrow keys, your number pad, or one of the letters",
+        )?;
         term.addstr(
             7,
             9,
-            &format!(" 'hjklyubn'. Your location is signified by the '{}' symbol.", ME),
+            &format!(
+                " 'hjklyubn'. Your location is signified by the '{}' symbol.",
+                ME
+            ),
         )?;
-        term.addstr(8, 9, " When you move in a direction, you erase N number of grid")?;
-        term.addstr(9, 9, " squares in that direction, N being the first number in that")?;
-        term.addstr(10, 9, " direction.  Your score reflects the total number of squares")?;
-        term.addstr(11, 9, " eaten.  Greed will not let you make a move that would have")?;
-        term.addstr(12, 9, " placed you off the grid or over a previously eaten square")?;
-        term.addstr(13, 9, " unless no valid moves exist, in which case your game ends.")?;
-        term.addstr(14, 9, " Other Greed commands are 'Ctrl-L' to redraw the screen,")?;
-        term.addstr(15, 9, " 'p' to toggle the highlighting of the possible moves, and")?;
-        term.addstr(16, 9, " 'q' to quit.  Command line options include '-s' (scores)")?;
+        term.addstr(
+            8,
+            9,
+            " When you move in a direction, you erase N number of grid",
+        )?;
+        term.addstr(
+            9,
+            9,
+            " squares in that direction, N being the first number in that",
+        )?;
+        term.addstr(
+            10,
+            9,
+            " direction.  Your score reflects the total number of squares",
+        )?;
+        term.addstr(
+            11,
+            9,
+            " eaten.  Greed will not let you make a move that would have",
+        )?;
+        term.addstr(
+            12,
+            9,
+            " placed you off the grid or over a previously eaten square",
+        )?;
+        term.addstr(
+            13,
+            9,
+            " unless no valid moves exist, in which case your game ends.",
+        )?;
+        term.addstr(
+            14,
+            9,
+            " Other Greed commands are 'Ctrl-L' to redraw the screen,",
+        )?;
+        term.addstr(
+            15,
+            9,
+            " 'p' to toggle the highlighting of the possible moves, and",
+        )?;
+        term.addstr(
+            16,
+            9,
+            " 'q' to quit.  Command line options include '-s' (scores)",
+        )?;
         term.addstr(17, 9, " and '-r' to set the RNG seed.")?;
         term.move_to(18, 71)?;
         term.flush()?;
@@ -704,56 +765,40 @@ fn fit_to_tty(config: &mut Config) {
 }
 
 fn terminal_size() -> Option<(i32, i32)> {
-    let output = Command::new("stty")
-        .arg("size")
-        .stdin(Stdio::inherit())
-        .output()
-        .ok()?;
-    let text = String::from_utf8(output.stdout).ok()?;
-    let mut fields = text.split_whitespace();
-    let rows = fields.next()?.parse::<i32>().ok()?;
-    let cols = fields.next()?.parse::<i32>().ok()?;
-    Some((rows, cols))
-}
-
-fn stty_state() -> Option<String> {
-    let output = Command::new("stty")
-        .arg("-g")
-        .stdin(Stdio::inherit())
-        .output()
-        .ok()?;
-    if output.status.success() {
-        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        None
-    }
+    let (cols, rows) = terminal::size().ok()?;
+    Some((i32::from(rows), i32::from(cols)))
 }
 
 fn read_key() -> io::Result<Key> {
-    let mut byte = [0];
-    io::stdin().read_exact(&mut byte)?;
-    match byte[0] {
-        b'\x1b' => read_escape_key(),
-        0x03 => Ok(Key::Ctrl('c')),
-        0x0c => Ok(Key::Ctrl('l')),
-        0x12 => Ok(Key::Ctrl('r')),
-        0x1c => Ok(Key::Ctrl('\\')),
-        byte if byte.is_ascii() => Ok(Key::Char(byte as char)),
-        _ => Ok(Key::Unknown),
+    loop {
+        let Event::Key(event) = event::read()? else {
+            continue;
+        };
+        if !matches!(event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+            continue;
+        }
+        return Ok(key_from_event(event));
     }
 }
 
-fn read_escape_key() -> io::Result<Key> {
-    let mut seq = [0; 2];
-    if io::stdin().read_exact(&mut seq).is_err() {
-        return Ok(Key::Unknown);
+fn key_from_event(event: KeyEvent) -> Key {
+    if event.modifiers.contains(KeyModifiers::CONTROL) {
+        return match event.code {
+            KeyCode::Char('c') | KeyCode::Char('C') => Key::Ctrl('c'),
+            KeyCode::Char('l') | KeyCode::Char('L') => Key::Ctrl('l'),
+            KeyCode::Char('r') | KeyCode::Char('R') => Key::Ctrl('r'),
+            KeyCode::Char('\\') | KeyCode::Char('4') => Key::Ctrl('\\'),
+            _ => Key::Unknown,
+        };
     }
-    match seq {
-        [b'[', b'A'] | [b'O', b'A'] => Ok(Key::Up),
-        [b'[', b'B'] | [b'O', b'B'] => Ok(Key::Down),
-        [b'[', b'C'] | [b'O', b'C'] => Ok(Key::Right),
-        [b'[', b'D'] | [b'O', b'D'] => Ok(Key::Left),
-        _ => Ok(Key::Unknown),
+
+    match event.code {
+        KeyCode::Char(ch) if ch.is_ascii() => Key::Char(ch),
+        KeyCode::Up => Key::Up,
+        KeyCode::Down => Key::Down,
+        KeyCode::Left => Key::Left,
+        KeyCode::Right => Key::Right,
+        _ => Key::Unknown,
     }
 }
 
@@ -1073,7 +1118,14 @@ fn topscores(newscore: i32, config: &Config) {
     if newscore > 0 {
         let newscore_p = score_adj(newscore, config.height, config.width, config.maxstep);
         for (idx, existing) in toplist.iter().enumerate() {
-            if newscore_p > score_adj(existing.score, existing.height, existing.width, existing.maxstep) {
+            if newscore_p
+                > score_adj(
+                    existing.score,
+                    existing.height,
+                    existing.width,
+                    existing.maxstep,
+                )
+            {
                 new_index = Some(idx);
                 break;
             }
@@ -1110,7 +1162,7 @@ fn topscores(newscore: i32, config: &Config) {
             break;
         }
         if Some(idx) == new_index {
-            print!("\x1b[7m");
+            let _ = execute!(io::stdout(), SetAttribute(Attribute::Reverse));
         }
 
         let sizestr = if entry.maxstep < 9 {
@@ -1130,7 +1182,7 @@ fn topscores(newscore: i32, config: &Config) {
         );
 
         if Some(idx) == new_index {
-            print!("\x1b[0m");
+            let _ = execute!(io::stdout(), SetAttribute(Attribute::Reset));
         }
     }
 }

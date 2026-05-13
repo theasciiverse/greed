@@ -10,8 +10,8 @@ MANDIR      ?= $(DATADIR)/man
 
 SFILE=/usr/games/lib/greed.hs
 
-RUSTC ?= rustc
-RUSTFLAGS += -C opt-level=2
+CARGO ?= cargo
+CARGOFLAGS ?= --release
 
 VERSION=$(shell sed -n <NEWS.adoc '/^[0-9]/s/:.*//p' | head -1)
 
@@ -35,27 +35,29 @@ VERSION=$(shell sed -n <NEWS.adoc '/^[0-9]/s/:.*//p' | head -1)
 
 all: greed greed.6
 
-greed: greed.rs
-	SCOREFILE="$(SFILE)" RELEASE="$(VERSION)" $(RUSTC) --edition=2021 $(RUSTFLAGS) -o greed greed.rs
+greed: greed.rs Cargo.toml Cargo.lock
+	SCOREFILE="$(SFILE)" RELEASE="$(VERSION)" $(CARGO) build $(CARGOFLAGS)
+	cp target/release/greed greed
 
 clean:
 	rm -f *~ *.o greed greed-*.tar.gz  greed*.rpm *.html
 	rm -f greed.6 manpage.links manpage.refs
+	rm -rf target
 
 # Validate
 
 reflow:
-	@rustfmt greed.rs
+	@$(CARGO) fmt
 
 check:
-	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; SCOREFILE="$(SFILE)" RELEASE="$(VERSION)" $(RUSTC) --edition=2021 $(RUSTFLAGS) --emit=metadata --out-dir "$$tmp" greed.rs
+	@SCOREFILE="$(SFILE)" RELEASE="$(VERSION)" $(CARGO) check $(CARGOFLAGS)
 
 spellcheck:
 	@spellcheck greed.adoc
 
 # Install/uninstall
 
-install: greed.6 uninstall
+install: greed greed.6 uninstall
 	install -m 0755 -d $(DESTDIR)$(BINDIR)
 	install -m 0755 greed $(DESTDIR)$(BINDIR)/
 	install -m 0755 -d $(DESTDIR)$(MANDIR)
@@ -68,7 +70,7 @@ uninstall:
 
 # Export
 
-SOURCES = README.adoc NEWS.adoc COPYING Makefile greed.rs greed.adoc control greed-logo.png
+SOURCES = README.adoc NEWS.adoc COPYING Makefile Cargo.toml Cargo.lock greed.rs greed.adoc control greed-logo.png
 
 greed-$(VERSION).tar.gz: $(SOURCES)
 	mkdir greed-$(VERSION)
