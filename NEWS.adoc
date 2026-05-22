@@ -1,5 +1,8 @@
 = greed project news
 
+5.2: 2026-05-22::
+  Beat the excessively-opininated Rust build chain into submission.
+
 5.1: 2026-05-21::
   Move code to crossterm to avoid a dependency on srtty(1).
 

@@ -82,11 +82,11 @@ greed-$(VERSION).tar.gz: $(SOURCES)
 dist: greed-$(VERSION).tar.gz
 
 release: greed-$(VERSION).tar.gz greed.html
-	@cargo_version=$$(sed -n 's/^version = "\(.*\)"$$/\1/p' Cargo.toml); test "$(VERSION)" = "$$cargo_version" || { echo "VERSION=$(VERSION) does not match Cargo.toml version=$$cargo_version" >&2; exit 1; }
+	@cargo_version=$$(sed -n 's/^version = "\(.*\)"$$/\1/p' Cargo.toml); test "$(VERSION).0" = "$$cargo_version" || { echo "VERSION=$(VERSION) does not match Cargo.toml version=$$cargo_version" >&2; exit 1; }
 	shipper version=$(VERSION) | sh -e -x
 
 refresh: greed.html
-	@cargo_version=$$(sed -n 's/^version = "\(.*\)"$$/\1/p' Cargo.toml); test "$(VERSION)" = "$$cargo_version" || { echo "VERSION=$(VERSION) does not match Cargo.toml version=$$cargo_version" >&2; exit 1; }
+	@cargo_version=$$(sed -n 's/^version = "\(.*\)"$$/\1/p' Cargo.toml); test "$(VERSION).0" = "$$cargo_version" || { echo "VERSION=$(VERSION) does not match Cargo.toml version=$$cargo_version" >&2; exit 1; }
 	shipper -N -w version=$(VERSION) | sh -e -x
 
 # end
