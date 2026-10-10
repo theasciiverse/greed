@@ -9,6 +9,7 @@ use std::env;
 use std::fs::{remove_file, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::mem::{align_of, size_of};
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
@@ -25,7 +26,33 @@ use crossterm::{execute, queue};
 
 const ME: char = '@';
 const MAXSCORES: usize = 10;
+#[cfg(unix)]
 const LOCKPATH: &str = "/tmp/Greed.lock";
+
+/// The score-file lock: /tmp on Unix as before, the system temp folder elsewhere.
+fn lock_path() -> PathBuf {
+    #[cfg(unix)]
+    {
+        PathBuf::from(LOCKPATH)
+    }
+    #[cfg(not(unix))]
+    {
+        env::temp_dir().join("Greed.lock")
+    }
+}
+
+/// File permission bits exist only on Unix; elsewhere the options pass through.
+fn with_mode(opts: &mut OpenOptions, mode: u32) -> &mut OpenOptions {
+    #[cfg(unix)]
+    {
+        opts.mode(mode)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = mode;
+        opts
+    }
+}
 const LOCALSCOREFILE: &str = ".greedscores";
 const USERNAMELEN: usize = 32;
 const USER_FIELD_LEN: usize = USERNAMELEN + 1;
@@ -1027,8 +1054,11 @@ fn write_score_file(file: &mut File, layout: &ScoreLayout, toplist: &[Score; MAX
 fn current_user() -> UserInfo {
     let name = env::var("USER")
         .or_else(|_| env::var("LOGNAME"))
+        .or_else(|_| env::var("USERNAME")) // Windows
         .unwrap_or_else(|_| "unknown".to_string());
-    let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let home = env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE")) // Windows
+        .unwrap_or_else(|_| ".".to_string());
     UserInfo {
         name,
         home: PathBuf::from(home),
@@ -1036,12 +1066,7 @@ fn current_user() -> UserInfo {
 }
 
 fn open_score_path(path: &Path) -> io::Result<File> {
-    OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .mode(0o600)
-        .open(path)
+    with_mode(OpenOptions::new().read(true).write(true).create(true), 0o600).open(path)
 }
 
 fn open_score_file(user: &UserInfo) -> File {
@@ -1063,20 +1088,15 @@ fn lockit(on: bool) {
     if on {
         let mut attempt = 1;
         loop {
-            match OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create_new(true)
-                .mode(0)
-                .open(LOCKPATH)
+            match with_mode(OpenOptions::new().read(true).write(true).create_new(true), 0).open(lock_path())
             {
                 Ok(_) => break,
                 Err(_) => {
                     println!("Waiting for scorefile access... {}/15", attempt);
                     if attempt >= 15 {
                         println!("Overriding stale lock...");
-                        if remove_file(LOCKPATH).is_err() {
-                            eprintln!("{}: {}: Can't unlink lock.", cmdname(), LOCKPATH);
+                        if remove_file(lock_path()).is_err() {
+                            eprintln!("{}: {}: Can't unlink lock.", cmdname(), lock_path().display());
                             process::exit(1);
                         }
                     }
@@ -1086,7 +1106,7 @@ fn lockit(on: bool) {
             }
         }
     } else {
-        let _ = remove_file(LOCKPATH);
+        let _ = remove_file(lock_path());
     }
 }
 
