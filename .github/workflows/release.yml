@@ -1,0 +1,105 @@
+# Builds Greed for the Asciiverse catalog: one archive per Rust target,
+# named <id>-<target>.tar.gz (Linux, macOS) or .zip (Windows), plus a
+# SHA256SUMS file, attached to a GitHub release (hub/catalog/SCHEMA.md,
+# release.source = "github"). Runs on a pushed tag, or by hand for an
+# existing tag.
+
+name: release
+
+on:
+  push:
+    tags: ["*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "existing tag to build and release"
+        required: true
+
+env:
+  ID: greed
+  BIN: greed
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-24.04, kind: musl }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04, kind: zig }
+          - { target: aarch64-apple-darwin, os: macos-14, kind: native }
+          - { target: x86_64-apple-darwin, os: macos-14, kind: native }
+          - { target: x86_64-pc-windows-msvc, os: windows-2022, kind: native }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: musl tools
+        if: matrix.kind == 'musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: zig cross linker
+        if: matrix.kind == 'zig'
+        run: pip install ziglang cargo-zigbuild
+
+      - name: Build
+        shell: bash
+        run: |
+          if [ "${{ matrix.kind }}" = zig ]; then
+            cargo zigbuild --release --locked --target ${{ matrix.target }}
+          else
+            cargo build --release --locked --target ${{ matrix.target }}
+          fi
+
+      - name: Package
+        shell: bash
+        run: |
+          out="$ID-${{ matrix.target }}"
+          dir="target/${{ matrix.target }}/release"
+          # the binary sits at the top of the archive, where av looks for it
+          mkdir -p dist stage
+          cp COPYING stage/
+          if [ "${{ runner.os }}" = Windows ]; then
+            cp "$dir/$BIN.exe" stage/
+            (cd stage && 7z a "../dist/$out.zip" .)
+          else
+            cp "$dir/$BIN" stage/
+            strip "stage/$BIN" 2>/dev/null || true
+            tar -czf "dist/$out.tar.gz" -C stage .
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS && cat SHA256SUMS
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" -R "$GITHUB_REPOSITORY" --title "Greed $TAG" \
+                 --notes "Greed $TAG from gitlab.com/esr/greed, built for the Asciiverse catalog."
+          gh release upload "$TAG" dist/* -R "$GITHUB_REPOSITORY" --clobber
