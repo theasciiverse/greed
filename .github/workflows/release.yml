@@ -31,8 +31,8 @@ jobs:
         include:
           - { target: x86_64-unknown-linux-musl, os: ubuntu-24.04, kind: musl }
           - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04, kind: zig }
-          - { target: aarch64-apple-darwin, os: macos-14, kind: native }
-          - { target: x86_64-apple-darwin, os: macos-14, kind: native }
+          - { target: aarch64-apple-darwin, os: macos-15, kind: native }
+          - { target: x86_64-apple-darwin, os: macos-15, kind: native }
           - { target: x86_64-pc-windows-msvc, os: windows-2022, kind: native }
     runs-on: ${{ matrix.os }}
     steps:
